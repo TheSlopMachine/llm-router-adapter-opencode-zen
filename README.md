@@ -1,15 +1,8 @@
 # OpenCode Zen Adapter for llm-router
 
-Adapter `opencode-zen` for `llm-router` (`ModelId = opencode-zen/<model>`). **Nologin free** — реверс `opencode` Zen (`packages/console/app/src/routes/zen/util/handler.ts:121,672`, `packages/console/core/src/model.ts:28` `allowAnonymous`).
+Adapter `opencode-zen` for `llm-router` (`ModelId = opencode-zen/<model>`).
 
-## How Free API Works (reverse-engineered from `sst/opencode`)
-
-- Base: `https://opencode.ai/zen/v1`
-- Endpoints: `POST /chat/completions` (`oa-compat`), `POST /responses` (`openai`), `POST /messages` (`anthropic`), `GET /models`
-- Free models have `allowAnonymous:true` — `handler.ts:102,121` uses `zenApiKey = undefined` when header is missing or `public`, `rateLimiter = ipRateLimiter` + `authenticate` skipped, billing `"anonymous"`/`"free"` not charged (`cost:"0"`).
-- Rate limit: IP-based via `ipRateLimiter.ts` (Redis `buildRateLimitKey("ip", ip)`), `FreeUsageLimitError` on exceed. Paid models require `Authorization: Bearer <key>`.
-
-Cloned discovery: `C:/tmp/opencode` (`git clone https://github.com/sst/opencode.git`) — see `packages/console/app/src/routes/zen/v1/chat/completions.ts:9`, `handler.ts:121-124`, `model.ts:28`.
+Lightweight gateway to `https://opencode.ai/zen/v1` with automatic free-tier handling.
 
 ## Installation
 
@@ -22,18 +15,16 @@ github.com/TheSlopMachine/llm-router-adapter-opencode-zen
 Then:
 
 ```bash
-make prepare-workspace   # generates adapters.go + go.work
+make prepare-workspace
 make go-check
 make start
 ```
 
-## Credential Shape — NOLOGIN
+## Credentials
 
-```json
-{}
-```
+No credentials required for free-tier models. The adapter works out of the box.
 
-Empty credentials accepted (`ValidateCredentials` allows empty). Optional for paid models:
+For higher limits or paid models, add an optional API key from `https://opencode.ai/zen`:
 
 ```json
 {
@@ -41,41 +32,35 @@ Empty credentials accepted (`ValidateCredentials` allows empty). Optional for pa
 }
 ```
 
-Stored as `sdk.Credential.Data["api_key"]`. Dashboard auth flow: "Leave empty for free tier".
+Leave the field empty in the dashboard to use the free tier.
 
 ## Supported Models
 
-Fetched via `GET https://opencode.ai/zen/v1/models` (no auth needed, 66 models). Fallback free catalog (IP rate-limited):
+Models are discovered via `GET https://opencode.ai/zen/v1/models` (66 models). Built-in fallback includes:
 
-- `opencode-zen/nemotron-3-ultra-free` (oa-compat `chat/completions`) — confirmed `pong` w/out key
+- `opencode-zen/nemotron-3-ultra-free`
 - `opencode-zen/nemotron-3.5-lightning-free`
 - `opencode-zen/mimo-v2.5-free`, `big-pickle`, `ling-3.0-flash-fin-free`
-- `opencode-zen/muse-spark-1.2-contributor-free` (`/responses`)
+- `opencode-zen/muse-spark-1.2-contributor-free`
 - `opencode-zen/muse-spark-1.3-contributor-free`
 
-Plus paid with key: `gpt-5`, `claude-sonnet-4.5`, `gemini-3-flash`, etc.
+Plus any model available on Zen with an API key (e.g. `gpt-5`, `claude-sonnet-4.5`, `gemini-3-flash`).
 
 ## Features
 
-- Non-streaming `POST /v1/chat/completions` + streaming SSE `data: [DONE]` (passthrough)
-- Auto routing by model: `gpt-*/muse-spark*/grok*` → `/responses`, `claude-*/qwen*` → `/messages`, others → `/chat/completions`
-- `GetModelInfos` + hardcoded fallback
-- No-login auth flow
+- `POST /v1/chat/completions` (non-streaming + SSE `data: [DONE]`)
+- Automatic routing by model family to the appropriate Zen endpoint
+- Streaming tool calls (including parallel) with correct `index`/`finish_reason`
+- No-login auth flow (IP-based rate limiting on free tier)
 
-## Example Usage
+## Example
 
 ```bash
-# free nologin (empty credential)
 curl -H "Authorization: Bearer $key" http://localhost:8081/v1/models
+
 curl -H "Authorization: Bearer $key" -H "Content-Type: application/json" \
   -d '{"model":"opencode-zen/nemotron-3-ultra-free","messages":[{"role":"user","content":"ping"}]}' \
   http://localhost:8081/v1/chat/completions
-
-# direct upstream check (no key)
-curl -X POST https://opencode.ai/zen/v1/chat/completions -H "Content-Type: application/json" \
-  -d '{"model":"nemotron-3-ultra-free","messages":[{"role":"user","content":"ping"}],"stream":false}'
-curl -X POST https://opencode.ai/zen/v1/responses -H "Content-Type: application/json" \
-  -d '{"model":"muse-spark-1.2-contributor-free","input":"ping","stream":false}'
 ```
 
 ## License
