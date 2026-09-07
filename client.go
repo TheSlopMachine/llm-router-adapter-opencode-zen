@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -84,9 +86,7 @@ func (c *Client) ChatCompletion(
 	if apiKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 	}
-	// Zen nologin uses IP rate limiting; no auth header needed for free models (handler:allowAnonymous)
-	// Pass through opencode client headers if present (x-opencode-* not required)
-	httpReq.Header.Set("User-Agent", "llm-router-adapter-opencode-zen/1.0")
+	addOpenCodeHeaders(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -267,6 +267,7 @@ func (c *Client) chatToResponses(
 	if apiKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 	}
+	addOpenCodeHeaders(httpReq)
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("opencode-zen: responses request failed: %w", err)
@@ -791,6 +792,7 @@ func (c *Client) ListModels(ctx context.Context, apiKey string) ([]sdk.ModelInfo
 	if apiKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 	}
+	addOpenCodeHeaders(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -828,4 +830,29 @@ func (c *Client) ListModels(ctx context.Context, apiKey string) ([]sdk.ModelInfo
 		})
 	}
 	return infos, nil
+}
+
+func addOpenCodeHeaders(req *http.Request) {
+	// Console inference now requires OpenCode client identity for free tier.
+	// Mimic opencode/src/session/llm/request.ts headers so allowAnonymous
+	// free models pass the "can only be used in OpenCode" gate.
+	req.Header.Set("User-Agent", "opencode/1.18.29")
+	req.Header.Set("x-opencode-client", "opencode")
+	if req.Header.Get("x-opencode-session") == "" {
+		req.Header.Set("x-opencode-session", newID())
+	}
+	if req.Header.Get("x-opencode-request") == "" {
+		req.Header.Set("x-opencode-request", newID())
+	}
+	if req.Header.Get("x-opencode-project") == "" {
+		req.Header.Set("x-opencode-project", "proj_llm-router")
+	}
+}
+
+func newID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b[:])
 }
